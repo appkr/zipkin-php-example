@@ -14,7 +14,7 @@ class BackendExample
 
     public function __construct()
     {
-        $this->logger = Logger::create();
+        $this->logger = Logger::create('backend');
     }
 
     public function run()
