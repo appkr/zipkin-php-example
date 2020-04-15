@@ -6,9 +6,6 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Request;
 use Psr\Http\Message\ResponseInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Zipkin\Propagation\DefaultSamplingFlags;
-use Zipkin\Span;
-use Zipkin\Tracer as ZipkinTracer;
 
 class FrontendExample
 {
@@ -23,40 +20,27 @@ class FrontendExample
 
     public function run()
     {
-        $tracer = Tracer::create();
-        $prevContext = Tracer::getPrevContextIfAny();
-        $curSpan = $tracer->nextSpan(Tracer::getPrevContextIfAny());
-        if ($prevContext instanceof DefaultSamplingFlags) {
-            $curSpan = $tracer->newTrace();
-        }
+        /*
+         * IMPORTANT NOTE. Tracer is an MUTABLE object.
+         */
+        $tracer = new Tracer();
+        $current = $tracer->currentSpan();
+        $ctx1 = $current->b3Headers();
+        $this->logger->info('Current Span', $ctx1);
 
-        $childSpan = $tracer->newChild($curSpan->getContext());
-        $this->registerShutdownFunction($tracer, $childSpan, $curSpan);
-
-        $resHeader = Tracer::getHeaderFrom($curSpan);
-        $reqHeader = Tracer::getHeaderFrom($childSpan);
-        $response = $this->callBackend($reqHeader);
-
-        $this->logger->info('Current Context', $resHeader);
-        $this->logger->info('Child Context', $reqHeader);
+        $child = $tracer->childSpan();
+        $ctx2 = $child->b3Headers();
+        $this->logger->info('Child Span', $ctx2);
+        $response = $this->callBackend($ctx2);
 
         $body = json_decode($response->getBody()->getContents(), true);
+        $headers = array_map(function ($h) { return $h[0]; }, $response->getHeaders());
         $this->logger->info('Response from Backend', [
-            'header' => array_map(function ($h) { return $h[0]; }, $response->getHeaders()),
+            'headers' => $headers,
             'body' => $body,
         ]);
 
-        return (new JsonResponse($body, $response->getStatusCode(), $resHeader))->send();
-    }
-
-    private function registerShutdownFunction(ZipkinTracer $tracer, Span ...$spans)
-    {
-        register_shutdown_function(function () use ($spans, $tracer) {
-            foreach ($spans as $span) {
-                $span->finish();
-            }
-            $tracer->flush();
-        });
+        return (new JsonResponse($body, $response->getStatusCode(), $headers))->send();
     }
 
     private function callBackend(array $reqHeader): ResponseInterface
