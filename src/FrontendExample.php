@@ -3,7 +3,9 @@
 namespace App;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Request;
+use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -25,13 +27,9 @@ class FrontendExample
          */
         $tracer = new Tracer();
         $current = $tracer->currentSpan();
-        $ctx1 = $current->b3Headers();
-        $this->logger->info('Current Span', $ctx1);
+        $this->logger->info('Current Span', $current->b3Headers());
 
-        $child = $tracer->childSpan();
-        $ctx2 = $child->b3Headers();
-        $this->logger->info('Child Span', $ctx2);
-        $response = $this->callBackend($ctx2);
+        $response = $this->callBackend($tracer);
 
         $body = json_decode($response->getBody()->getContents(), true);
         $headers = array_map(function ($h) { return $h[0]; }, $response->getHeaders());
@@ -43,10 +41,38 @@ class FrontendExample
         return (new JsonResponse($body, $response->getStatusCode(), $headers))->send();
     }
 
-    private function callBackend(array $reqHeader): ResponseInterface
+    private function callBackend(Tracer $tracer): ResponseInterface
     {
-        $httpClient = new Client();
-        $request = new Request('GET', self::BACKEND_ENDPOINT, $reqHeader);
+        $child = $tracer->childSpan();
+
+        /**
+         * @var $reqHeader
+         * {
+         *     "x-b3-traceid": "d4ca90093540675a",
+         *     "x-b3-spanid": "a453a149ba41debc",
+         *     "x-b3-parentspanid": "d4ca90093540675a",
+         *     "x-b3-sampled": "1",
+         *     "x-b3-flags": "0"
+         * }
+         */
+        $reqHeader = $child->b3Headers();
+        $this->logger->info('Child Span', $reqHeader);
+
+        /**
+         * For Guzzle Middleware @see http://docs.guzzlephp.org/en/stable/handlers-and-middleware.html#middleware
+         */
+        $stack = HandlerStack::create();
+        $stack->push(function (callable $handler) use ($reqHeader) {
+            return function (RequestInterface $req, array $options) use ($handler, $reqHeader){
+                foreach ($reqHeader as $k => $v) {
+                    $req = $req->withHeader($k, $v);
+                }
+                return $handler($req, $options);
+            };
+        });
+
+        $httpClient = new Client(['handler' => $stack]);
+        $request = new Request('GET', self::BACKEND_ENDPOINT);
 
         return $httpClient->send($request);
     }

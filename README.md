@@ -3,17 +3,19 @@
 Clone
 ```bash
 $ git clone git@github.com:appkr/zipkin-php-example.git
+$ cd zipkin-php-example
+~/zipkin-php-example $ composer install 
 ```
 
 Run zipkin and local web server
 ```bash
-$ docker run -p 9411:9411 -d openzipkin/zipkin
+~/zipkin-php-example $ docker run -p 9411:9411 -d openzipkin/zipkin
 
 # For backend
-$ php -S localhost:8001
+~/zipkin-php-example $ php -S localhost:8001
 
 # For frontend
-$ php -S localhost:8000
+~/zipkin-php-example $ php -S localhost:8000
 ```
 
 Backend test
@@ -91,7 +93,7 @@ $ curl -s -i \
 ```
 
 ```bash
-$ tail -f logs/app.log
+~/zipkin-php-example $ tail -f logs/app.log
 [2020-04-13 15:59:21] backend.INFO: Response Headers {"x-b3-traceid":"d4ca90093540675a","x-b3-spanid":"6593554f14328557","x-b3-parentspanid":"1a5b62d8bcd00807","x-b3-sampled":"1","x-b3-flags":"0"} []
 [2020-04-13 15:59:21] frontend.INFO: Current Context {"x-b3-traceid":"d4ca90093540675a","x-b3-spanid":"893dfa58f3b09fd5","x-b3-parentspanid":"d4ca90093540675a","x-b3-sampled":"1","x-b3-flags":"0"} []
 [2020-04-13 15:59:21] frontend.INFO: Child Context {"x-b3-traceid":"d4ca90093540675a","x-b3-spanid":"1a5b62d8bcd00807","x-b3-parentspanid":"893dfa58f3b09fd5","x-b3-sampled":"1","x-b3-flags":"0"} []
