@@ -11,20 +11,37 @@ class BackendExample
 
     public function __construct()
     {
+        /**
+         * NOTE 4. A new singleton instance of Tracer created,
+         *     but thanks to the b3-* request header, the Tracer will relay the previous span
+         */
         $this->logger = Logger::create('backend');
     }
 
     public function run()
     {
-        $tracer = new Tracer();
-        $current = $tracer->currentSpan();
-        $this->logger->info("Current Span", $current->b3Headers());
+        $this->logger->info('request received');
 
-        return $this->createResponse(['foo' => 'bar'], $current->b3Headers())->send();
+        $this->callDatabase();
+
+        return JsonResponse::create(
+            ['foo' => 'bar'],
+            Response::HTTP_OK,
+            Tracer::getInstance()->b3Headers()
+        )->send();
     }
 
-    private function createResponse(array $content, array $headers): Response
+    private function callDatabase()
     {
-        return JsonResponse::create($content, Response::HTTP_OK, $headers);
+        /**
+         * NOTE 5. Start a child span in backend
+         */
+        Tracer::getInstance()->childSpan();
+
+        $this->logger->info('querying database');
+
+        $db = new \PDO('sqlite::memory:');
+        $db->exec('CREATE TABLE IF NOT EXISTS zipkin(id INTEGER PRIMARY KEY)');
+        $db->query('SELECT 1 FROM zipkin');
     }
 }

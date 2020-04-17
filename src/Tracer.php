@@ -7,7 +7,6 @@ use Zipkin\Endpoint;
 use Zipkin\Propagation\B3;
 use Zipkin\Propagation\Map;
 use Zipkin\Propagation\SamplingFlags;
-use Zipkin\Propagation\TraceContext;
 use Zipkin\Reporters\Http;
 use Zipkin\Samplers\BinarySampler;
 use Zipkin\Span;
@@ -19,11 +18,32 @@ class Tracer
     const SERVICE_NAME = 'test-service';
     const ENDPOINT_URL = 'http://localhost:9411/api/v2/spans';
 
+    /** @var Tracer */
+    private static $INSTANCE;
+
     /** @var ZipkinTracer */
     private $zipkin  = null;
 
     /** @var Span */
     private $currentSpan = null;
+
+    /**
+     * Get a singleton instance
+     *
+     * @return Tracer
+     */
+    public static function getInstance(): Tracer
+    {
+        if (self::$INSTANCE == null) {
+            self::$INSTANCE = new Tracer();
+        }
+
+        return self::$INSTANCE;
+    }
+
+    private function __construct()
+    {
+    }
 
     /**
      * Start a new span, succeed the previous context if it exists
@@ -51,6 +71,36 @@ class Tracer
     }
 
     /**
+     * @param array $resHeaders {
+     *     @var string $key e.g. content-type
+     *     @var array $values {
+     *         @var string $value e.g. application/json
+     *     }
+     * }
+     * @return $this
+     */
+    public function nextSpan(array $resHeaders)
+    {
+        if ($this->currentSpan == null) {
+            $this->currentSpan();
+        }
+
+        $parsedHeaders = $this->parseHeaders($resHeaders);
+        $extractor = (new B3())->getExtractor(new Map());
+
+        $this->currentSpan = $this->zipkin->nextSpan($extractor($parsedHeaders));
+
+        $self = $this;
+        register_shutdown_function(function () use ($self) {
+            $self->currentSpan->finish();
+        });
+
+        $this->currentSpan->start();
+
+        return $this;
+    }
+
+    /**
      * Start a child span
      *
      * @return $this
@@ -61,7 +111,7 @@ class Tracer
             $this->currentSpan();
         }
 
-        $this->currentSpan = $this->zipkin->newChild($this->context());
+        $this->currentSpan = $this->zipkin->newChild($this->currentSpan->getContext());
 
         $self = $this;
         register_shutdown_function(function () use ($self) {
@@ -89,7 +139,8 @@ class Tracer
                 $this->zipkin = TracingBuilder::create()
                     ->havingLocalEndpoint($endpoint)
                     ->havingSampler($sampler)
-                    ->havingReporter($reporter)
+                    // We do not report to zipkin, instead we only use b3-* trace
+                    // ->havingReporter($reporter)
                     ->build()
                     ->getTracer();
             }
@@ -102,7 +153,9 @@ class Tracer
          */
         private function getPreviousContext(): SamplingFlags
         {
-            $reqHeaders = static::parseRequestHeaders();
+            $request = Request::createFromGlobals();
+
+            $reqHeaders = $this->parseHeaders($request->headers->all());
             if (empty($reqHeaders)) {
                 return $reqHeaders;
             }
@@ -115,31 +168,23 @@ class Tracer
         /**
          * Parse and get request headers
          *
-         * @return array
+         * @param array $headers {
+         *     @var string $key e.g. content-type
+         *     @var array $values {
+         *         @var string $value e.g. application/json
+         *     }
+         * }
+         * @return array {
+         *     @var string $key
+         *     @var string $value
+         * }
          */
-        private static function parseRequestHeaders(): array
+        private function parseHeaders(array $headers): array
         {
-            $request = Request::createFromGlobals();
-
             return array_map(function ($header) {
                 return $header[0];
-            }, $request->headers->all());
+            }, $headers);
         }
-
-        private function getZipkin(): ZipkinTracer
-        {
-            return $this->zipkin;
-        }
-
-    /**
-     * Get trace context of the current span
-     *
-     * @return TraceContext
-     */
-    public function context(): TraceContext
-    {
-        return $this->currentSpan->getContext();
-    }
 
     /**
      * Extract and get x-b3-* header from the current span
@@ -154,9 +199,13 @@ class Tracer
      */
     public function b3Headers(): array
     {
+        if ($this->currentSpan == null) {
+            $this->currentSpan();
+        }
+
         $context = [];
         $injector = (new B3())->getInjector(new Map());
-        $injector($this->context(), $context);
+        $injector($this->currentSpan->getContext(), $context);
 
         return $context;
     }
