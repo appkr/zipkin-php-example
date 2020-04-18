@@ -1,0 +1,9 @@
+server:
+    port: 8001
+
+spring:
+    application:
+        name: spring-backend
+    sleuth:
+        sampler:
+            probability: 1

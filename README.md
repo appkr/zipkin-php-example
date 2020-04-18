@@ -103,7 +103,7 @@ $ curl -s -i \
 ```
 
 ```bash
-                            {traceId         , spanId           , message}
+#                           {traceId         , spanId          , message}
 curl request                {d4ca90093540675a, d4ca90093540675a, } 
     -> frontend             {d4ca90093540675a, 6ea5c89f18962288, request received}
         -> guzzle request   {d4ca90093540675a, c15d463189780fb4, calling backend}
@@ -112,3 +112,7 @@ curl request                {d4ca90093540675a, d4ca90093540675a, }
         <- guzzle response  {d4ca90093540675a, 145631c0092db202, response received from backend}     
     <- frontend response    {d4ca90093540675a, 145631c0092db202, }
 ```
+
+---
+
+[Inter-working with a backend written in Java Spring Framework](https://github.com/appkr/zipkin-php-example/tree/master/spring-backend)
