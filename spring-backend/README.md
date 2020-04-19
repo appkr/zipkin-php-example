@@ -1,18 +1,10 @@
 ## Inter-working with a non-php framework
 
-Change backend base url
-
-```diff
-<?php // ~/zipkin-php-example/src/FrontendExample.php
-
-- const BACKEND_ENDPOINT = 'http://localhost:8001/backend.php';
-+ const BACKEND_ENDPOINT = 'http://localhost:8001';
-```
-
 Run the backend
 
 ```bash
 ~/zipkin-php-example/spring-backend $ ./gradlew clean bootRun
+# 2020-04-18 22:20:00.000  INFO [spring-backend,,,] 48428 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8001
 ```
 
 Run the frontend
@@ -27,7 +19,7 @@ Test
 $ curl -s -i \
         -H "X-B3-TraceId: d4ca90093540675a" \
         -H "X-B3-SpanId: d4ca90093540675a" \
-        http://localhost:8000/frontend.php
+        http://localhost:8000/frontend
 
 # HTTP/1.0 200 OK
 # Host: localhost:8000

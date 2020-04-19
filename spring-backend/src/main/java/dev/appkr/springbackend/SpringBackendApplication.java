@@ -17,7 +17,7 @@ public class SpringBackendApplication {
 
 	private Logger log = LoggerFactory.getLogger(getClass());
 
-	@GetMapping("/")
+	@GetMapping("/backend")
 	public ResponseEntity<Map<String, String>> getFoo() {
 		log.info("request received");
 		Map<String, String> body = new HashMap<String, String>() {{

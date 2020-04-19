@@ -3,14 +3,11 @@
 namespace App;
 
 use Symfony\Component\HttpFoundation\Request;
-use Zipkin\Endpoint;
+use Zipkin\DefaultTracing;
 use Zipkin\Propagation\B3;
 use Zipkin\Propagation\Map;
 use Zipkin\Propagation\SamplingFlags;
-use Zipkin\Reporters\Http;
-use Zipkin\Samplers\BinarySampler;
 use Zipkin\Span;
-use Zipkin\Tracer as ZipkinTracer;
 use Zipkin\TracingBuilder;
 
 class Tracer
@@ -21,8 +18,8 @@ class Tracer
     /** @var Tracer */
     private static $INSTANCE;
 
-    /** @var ZipkinTracer */
-    private $zipkin  = null;
+    /** @var DefaultTracing */
+    private static $tracing;
 
     /** @var Span */
     private $currentSpan = null;
@@ -46,7 +43,7 @@ class Tracer
     }
 
     /**
-     * Start a new span, succeed the previous context if it exists
+     * Start new span, succeed the previous context if it exists
      *
      * @return Tracer
      */
@@ -54,14 +51,15 @@ class Tracer
     {
         if ($this->currentSpan == null) {
             $this->initZipkin();
-            $this->currentSpan = $this->zipkin->nextSpan(
-                $this->getPreviousContext()
+
+            $this->currentSpan = self::$tracing->getTracer()->nextSpan(
+                $this->getPreviousContextIfAny()
             );
 
             $self = $this;
             register_shutdown_function(function () use ($self) {
                 $self->currentSpan->finish();
-                $self->zipkin->flush();
+                self::$tracing->getTracer()->flush();
             });
 
             $this->currentSpan->start();
@@ -71,6 +69,8 @@ class Tracer
     }
 
     /**
+     * Start new span, succeed a context from downstream response
+     *
      * @param array $resHeaders {
      *     @var string $key e.g. content-type
      *     @var array $values {
@@ -79,16 +79,17 @@ class Tracer
      * }
      * @return $this
      */
-    public function nextSpan(array $resHeaders)
+    public function nextSpan(array $resHeaders = []): Tracer
     {
         if ($this->currentSpan == null) {
             $this->currentSpan();
         }
 
-        $parsedHeaders = $this->parseHeaders($resHeaders);
-        $extractor = (new B3())->getExtractor(new Map());
+        $carrier = $this->rearrangeHeaders($resHeaders);
 
-        $this->currentSpan = $this->zipkin->nextSpan($extractor($parsedHeaders));
+        $extractor = self::$tracing->getPropagation()->getExtractor(new Map());
+
+        $this->currentSpan = self::$tracing->getTracer()->nextSpan($extractor($carrier));
 
         $self = $this;
         register_shutdown_function(function () use ($self) {
@@ -111,7 +112,7 @@ class Tracer
             $this->currentSpan();
         }
 
-        $this->currentSpan = $this->zipkin->newChild($this->currentSpan->getContext());
+        $this->currentSpan = self::$tracing->getTracer()->newChild($this->currentSpan->getContext());
 
         $self = $this;
         register_shutdown_function(function () use ($self) {
@@ -129,20 +130,21 @@ class Tracer
          * @param string|null $serviceName Name of the service you are running, default to test-service
          * @param string|null $endpointUrl Zipkin api endpoint, default to http://localhost:9411/api/v2/spans
          */
-        private function initZipkin(string $serviceName = null, string $endpointUrl = null)
+        private function initZipkin(string $serviceName = null, string $endpointUrl = null): void
         {
-            if ($this->zipkin == null) {
-                $endpoint = Endpoint::create($serviceName ?: static::SERVICE_NAME);
-                $reporter = new Http(null, ['endpoint_url' => $endpointUrl ?: static::ENDPOINT_URL]);
-                $sampler = BinarySampler::createAsAlwaysSample();
+            if (self::$tracing == null) {
+                self::$tracing = TracingBuilder::create()->build();
 
-                $this->zipkin = TracingBuilder::create()
-                    ->havingLocalEndpoint($endpoint)
-                    ->havingSampler($sampler)
-                    // We do not report to zipkin, instead we only use b3-* trace
+                // We do not report to zipkin, instead we only use b3-* trace
+                // $endpoint = \Zipkin\Endpoint::create($serviceName ?: static::SERVICE_NAME);
+                // $reporter = new \Zipkin\Reporters\Http(null, ['endpoint_url' => $endpointUrl ?: static::ENDPOINT_URL]);
+                // $sampler = \Zipkin\Samplers\BinarySampler::createAsAlwaysSample();
+
+                // TracingBuilder::create()
+                    // ->havingSampler($sampler)
+                    // ->havingLocalEndpoint($endpoint)
                     // ->havingReporter($reporter)
-                    ->build()
-                    ->getTracer();
+                    // ->build()
             }
         }
 
@@ -150,19 +152,18 @@ class Tracer
          * Parse and get previous context from http request, only if it exists
          *
          * @return SamplingFlags
+         * - TraceContext if trace and span IDs were present
+         * - SamplingFlags if no identifiers were present
          */
-        private function getPreviousContext(): SamplingFlags
+        private function getPreviousContextIfAny(): SamplingFlags
         {
             $request = Request::createFromGlobals();
 
-            $reqHeaders = $this->parseHeaders($request->headers->all());
-            if (empty($reqHeaders)) {
-                return $reqHeaders;
-            }
+            $carrier = $this->rearrangeHeaders($request->headers->all());
 
-            $extractor = (new B3())->getExtractor(new Map());
+            $extractor = self::$tracing->getPropagation()->getExtractor(new Map());
 
-            return $extractor($reqHeaders);
+            return $extractor($carrier);
         }
 
         /**
@@ -179,7 +180,7 @@ class Tracer
          *     @var string $value
          * }
          */
-        private function parseHeaders(array $headers): array
+        private function rearrangeHeaders(array $headers): array
         {
             return array_map(function ($header) {
                 return $header[0];
@@ -190,12 +191,13 @@ class Tracer
      * Extract and get x-b3-* header from the current span
      *
      * @return array {
-     *      @var string x-b3-traceid 64bit or 128bit hex
-     *      @var string x-b3-spanid 64bit or 128bit hex
-     *      @var string x-b3-parentspanid 64bit or 128bit hex
-     *      @var string x-b3-sampled 1 or 0
-     *      @var string x-b3-flags 1 or 0
-     * } for details @see https://github.com/openzipkin/b3-propagation
+     *      @var string x-b3-traceid 128 or 64 lower-hex encoded bits (required)
+     *      @var string x-b3-spanid 64 lower-hex encoded bits (required)
+     *      @var string x-b3-parentspanid 64 lower-hex encoded bits (absent on root span)
+     *      @var string x-b3-sampled Boolean (either “1” or “0”, can be absent)
+     *      @var string x-b3-flags “1” means debug (can be absent)
+     * }
+     * for details @see https://github.com/openzipkin/b3-propagation
      */
     public function b3Headers(): array
     {
@@ -203,10 +205,10 @@ class Tracer
             $this->currentSpan();
         }
 
-        $context = [];
+        $b3Headers = [];
         $injector = (new B3())->getInjector(new Map());
-        $injector($this->currentSpan->getContext(), $context);
+        $injector($this->currentSpan->getContext(), $b3Headers);
 
-        return $context;
+        return $b3Headers;
     }
 }

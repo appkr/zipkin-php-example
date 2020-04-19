@@ -11,11 +11,11 @@ $ cd zipkin-php-example
 ~/zipkin-php-example $ composer install 
 ```
 
-Run zipkin and local web server
+Run local web server (OPTIONAL, and zipkin server)
 ```bash
 # The example uses b3-* tracing only, and does not use zipkin reporting
 # If you want it to be enabled, uncomment corresponding line in \App\Tracer::initZipkin
-~/zipkin-php-example $ docker run -p 9411:9411 -d openzipkin/zipkin
+# ~/zipkin-php-example $ docker run -p 9411:9411 -d openzipkin/zipkin
 
 # For backend
 ~/zipkin-php-example $ php -S localhost:8001
@@ -26,7 +26,7 @@ Run zipkin and local web server
 
 Backend test
 ```bash
-$ curl -s -i http://localhost:8001/backend.php
+$ curl -s -i http://localhost:8001/backend
 
 # HTTP/1.0 200 OK
 # Host: localhost:8001
@@ -47,7 +47,7 @@ $ curl -s -i http://localhost:8001/backend.php
 
 Frontend test
 ```bash
-$ curl -s -i http://localhost:8000/frontend.php
+$ curl -s -i http://localhost:8000/frontend
 
 # HTTP/1.0 200 OK
 # Host: localhost:8000
@@ -74,7 +74,7 @@ Frontend test with request headers
 $ curl -s -i \
         -H "X-B3-TraceId: d4ca90093540675a" \
         -H "X-B3-SpanId: d4ca90093540675a" \
-        http://localhost:8000/frontend.php
+        http://localhost:8000/frontend
 
 #  HTTP/1.0 200 OK
 #  Host: localhost:8000
